@@ -9,6 +9,11 @@ use yang2::data::{
     DataTree, DataValidationFlags,
 };
 
+enum Mode {
+    Nix2Yang,
+    Yang2Nix,
+}
+
 fn main() -> std::io::Result<()> {
 
     let mut args = std::env::args();
@@ -16,8 +21,8 @@ fn main() -> std::io::Result<()> {
     drop(args.next());
 
     let mode = match args.next().as_ref().map(|x| x.as_str()) {
-        Some("yang2nix") => {},
-        Some("nix2yang") => {},
+        Some("yang2nix") => Mode::Yang2Nix,
+        Some("nix2yang") => Mode::Nix2Yang,
         _ => panic!("mode: yang2nix nix2yang"),
     };
 
@@ -53,7 +58,7 @@ fn main() -> std::io::Result<()> {
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
         // only lists that have _exactly_ one key; and extract that key
         .filter_map(|node| {
-            let mut keys = node.children().filter(SchemaNode::is_list_key).map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
+            let keys = node.children().filter(SchemaNode::is_list_key).map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
             (keys.len() == 1).then(|| (node, keys.into_iter().next().unwrap()) )
         })
     {
@@ -79,19 +84,37 @@ fn main() -> std::io::Result<()> {
                 // last node ; convert
                 //println!("{:?} {:?}", node.path(SchemaPathFormat::DATA), key);
                 for e in p {
-                    let as_array = if let serde_json::Value::Array(a) = e.take() {
-                        a
-                    } else { panic!() };
-                    let o = serde_json::Value::Object(
-                        as_array.into_iter().map(|mut el| {
-                            let k = el.as_object_mut().expect("expected an object").remove(&key).expect("expected key");
-                            (
-                                k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| n.as_i64()).map(|n| n.to_string())).expect("can not determine key"),
-                                el
-                            )
-                        }).collect::<serde_json::Map<String, serde_json::Value>>()
-                    );
-                    *e = o;
+
+                    match mode {
+                        Mode::Yang2Nix => {
+                            let as_array = if let serde_json::Value::Array(a) = e.take() {
+                                a
+                            } else { panic!("Expected an array. Are you sure this is a YANG-style file?") };
+                            let o = serde_json::Value::Object(
+                                as_array.into_iter().map(|mut el| {
+                                    let k = el.as_object_mut().expect("expected an object").remove(&key).expect("expected key");
+                                    (
+                                        k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| n.as_i64()).map(|n| n.to_string())).expect("can not determine key"),
+                                        el
+                                    )
+                                }).collect::<serde_json::Map<String, serde_json::Value>>()
+                            );
+                            *e = o;
+                        }
+                        Mode::Nix2Yang => {
+                            let as_object = if let serde_json::Value::Object(o) = e.take() {
+                                o
+                            } else { panic!("Expected an object. Are you sure this is a Nix-style file?") };
+                            let a = serde_json::Value::Array(
+                                as_object.into_iter().map(|(k, mut el)| {
+                                    let el2 = el.as_object_mut().expect("expected an object");
+                                    el2.insert(key.clone(), k.into());
+                                    el
+                                }).collect::<Vec<serde_json::Value>>()
+                            );
+                            *e = a;
+                        }
+                    }
 
                     //println!("{:?}", e);
                 }
