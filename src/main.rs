@@ -1,13 +1,6 @@
 use std::sync::Arc;
-use std::fs::File;
 use yang2::schema::SchemaNodeKind;
-use yang2::schema::SchemaNode;
-use yang2::schema::SchemaPathFormat;
 use yang2::context::{Context, ContextFlags};
-use yang2::data::{
-    Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags,
-    DataTree, DataValidationFlags,
-};
 
 enum Mode {
     Convert(ConvertMode),
@@ -36,7 +29,7 @@ fn main() -> std::io::Result<()> {
     ctx.set_searchdir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
         .expect("Failed to set YANG search directory");
     
-    let module = ctx.load_module("rtbrick-config", None, &[])
+    ctx.load_module("rtbrick-config", None, &[])
         .expect("Failed to load module");
 
     let ctx = Arc::new(ctx);
@@ -51,21 +44,11 @@ fn main() -> std::io::Result<()> {
 
     let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
-    // Parse data trees from JSON strings.
-    let dtree1 = DataTree::parse_file(
-        &ctx,
-        File::open("./settings.json")?,
-        DataFormat::JSON,
-        DataParserFlags::NO_VALIDATION,
-        DataValidationFlags::empty(),
-    )
-    .expect("Failed to parse data tree");
-
     for node in module.traverse()
         // only lists that have keys
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
     {
-        let key_names = node.children().filter(SchemaNode::is_list_key).map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
+        let key_names = node.list_keys().map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
         let mut p = vec![&mut data];
 
         let mut ancestors = node.inclusive_ancestors().collect::<Vec<_>>().into_iter().rev().enumerate();
@@ -125,7 +108,7 @@ fn main() -> std::io::Result<()> {
                                     let as_object = if let serde_json::Value::Object(o) = el.take() {
                                         o
                                     } else { panic!("Expected an object. Are you sure this is a Nix-style file?"); };
-                                    for (key, mut el2) in as_object {
+                                    for (key, el2) in as_object {
                                         let mut depth = depth.clone();
                                         depth.push(key);
                                         q.push((depth, el2));
@@ -143,7 +126,7 @@ fn main() -> std::io::Result<()> {
                 break;
             }
             if an.kind() == SchemaNodeKind::List {
-                for _ in an.children().filter(SchemaNode::is_list_key) {
+                for _ in an.list_keys() {
                     p = p.into_iter().flat_map(|x| -> Box<dyn Iterator<Item = &mut serde_json::Value>> {
                         match x {
                             serde_json::Value::Array(a) => Box::new(a.into_iter()),
