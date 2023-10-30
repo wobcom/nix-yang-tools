@@ -53,15 +53,11 @@ fn main() -> std::io::Result<()> {
     )
     .expect("Failed to parse data tree");
 
-    for (node, key) in module.traverse()
+    for node in module.traverse()
         // only lists that have keys
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
-        // only lists that have _exactly_ one key; and extract that key
-        .filter_map(|node| {
-            let keys = node.children().filter(SchemaNode::is_list_key).map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
-            (keys.len() == 1).then(|| (node, keys.into_iter().next().unwrap()) )
-        })
     {
+        let key_names = node.children().filter(SchemaNode::is_list_key).map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
         let mut p = vec![&mut data];
 
         let mut ancestors = node.inclusive_ancestors().collect::<Vec<_>>().into_iter().rev().enumerate();
@@ -90,29 +86,46 @@ fn main() -> std::io::Result<()> {
                             let as_array = if let serde_json::Value::Array(a) = e.take() {
                                 a
                             } else { panic!("Expected an array. Are you sure this is a YANG-style file?") };
-                            let o = serde_json::Value::Object(
-                                as_array.into_iter().map(|mut el| {
-                                    let k = el.as_object_mut().expect("expected an object").remove(&key).expect("expected key");
-                                    (
-                                        k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| n.as_i64()).map(|n| n.to_string())).expect("can not determine key"),
-                                        el
-                                    )
-                                }).collect::<serde_json::Map<String, serde_json::Value>>()
-                            );
-                            *e = o;
+
+                            for mut el in as_array {
+                                let mut p2 = &mut *e; // reference to the value where the element will be inserted
+                                for key in &key_names {
+                                    let k = el.as_object_mut().expect("expected an object").remove(key).expect("expected key");
+                                    let k = k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| n.as_i64()).map(|n| n.to_string())).expect("can not determine key");
+
+                                    if !p2.is_object() { *p2 = serde_json::Value::Object(Default::default()); };
+                                    p2 = p2.as_object_mut().unwrap().entry(k).or_insert(serde_json::Value::Null);
+                                }
+                                *p2 = el; // insert element
+                            }
                         }
                         Mode::Nix2Yang => {
-                            let as_object = if let serde_json::Value::Object(o) = e.take() {
-                                o
-                            } else { panic!("Expected an object. Are you sure this is a Nix-style file?") };
-                            let a = serde_json::Value::Array(
-                                as_object.into_iter().map(|(k, mut el)| {
-                                    let el2 = el.as_object_mut().expect("expected an object");
-                                    el2.insert(key.clone(), k.into());
-                                    el
-                                }).collect::<Vec<serde_json::Value>>()
-                            );
-                            *e = a;
+
+                            let mut a = vec![];
+
+                            let mut q: Vec<(Vec<String>, _)> = vec![(vec![], e.take())];
+
+                            while let Some((depth, mut el)) = q.pop() {
+                                if depth.len() == key_names.len() {
+                                    for (key, key_name) in depth.into_iter().zip(&key_names) {
+                                        el.as_object_mut().expect("expected object").insert(key_name.clone(), key.into());
+                                    }
+                                    a.push(el);
+                                } else {
+                                    //println!("{:?}", depth);
+                                    //println!("{:?}", el);
+                                    let as_object = if let serde_json::Value::Object(o) = el.take() {
+                                        o
+                                    } else { panic!("Expected an object. Are you sure this is a Nix-style file?"); };
+                                    for (key, mut el2) in as_object {
+                                        let mut depth = depth.clone();
+                                        depth.push(key);
+                                        q.push((depth, el2));
+                                    }
+                                }
+                            }
+
+                            *e = serde_json::Value::Array(a);
                         }
                     }
 
@@ -122,13 +135,15 @@ fn main() -> std::io::Result<()> {
                 break;
             }
             if an.kind() == SchemaNodeKind::List {
-                p = p.into_iter().flat_map(|x| -> Box<dyn Iterator<Item = &mut serde_json::Value>> {
-                    match x {
-                        serde_json::Value::Array(a) => Box::new(a.into_iter()),
-                        serde_json::Value::Object(o) => Box::new(o.values_mut()),
-                        _ => panic!(),
-                    }
-                }).collect();
+                for _ in an.children().filter(SchemaNode::is_list_key) {
+                    p = p.into_iter().flat_map(|x| -> Box<dyn Iterator<Item = &mut serde_json::Value>> {
+                        match x {
+                            serde_json::Value::Array(a) => Box::new(a.into_iter()),
+                            serde_json::Value::Object(o) => Box::new(o.values_mut()),
+                            _ => panic!(),
+                        }
+                    }).collect();
+                }
             }
 
             if p.len() == 0 { break; }
