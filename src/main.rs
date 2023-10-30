@@ -10,6 +10,10 @@ use yang2::data::{
 };
 
 enum Mode {
+    Convert(ConvertMode),
+}
+
+enum ConvertMode {
     Nix2Yang,
     Yang2Nix,
 }
@@ -21,14 +25,10 @@ fn main() -> std::io::Result<()> {
     drop(args.next());
 
     let mode = match args.next().as_ref().map(|x| x.as_str()) {
-        Some("yang2nix") => Mode::Yang2Nix,
-        Some("nix2yang") => Mode::Nix2Yang,
+        Some("yang2nix") => Mode::Convert(ConvertMode::Yang2Nix),
+        Some("nix2yang") => Mode::Convert(ConvertMode::Nix2Yang),
         _ => panic!("mode: yang2nix nix2yang"),
     };
-
-    let file = args.next().expect("filename");
-
-    let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
     // Initialize context.
     let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY)
@@ -42,6 +42,14 @@ fn main() -> std::io::Result<()> {
     let ctx = Arc::new(ctx);
 
     let module = ctx.get_module_latest("rtbrick-config").unwrap();
+
+    let mode = match mode {
+        Mode::Convert(mode) => mode,
+    };
+
+    let file = args.next().expect("filename");
+
+    let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
     // Parse data trees from JSON strings.
     let dtree1 = DataTree::parse_file(
@@ -82,7 +90,7 @@ fn main() -> std::io::Result<()> {
                 for e in p {
 
                     match mode {
-                        Mode::Yang2Nix => {
+                        ConvertMode::Yang2Nix => {
                             let as_array = if let serde_json::Value::Array(a) = e.take() {
                                 a
                             } else { panic!("Expected an array. Are you sure this is a YANG-style file?") };
@@ -99,7 +107,7 @@ fn main() -> std::io::Result<()> {
                                 *p2 = el; // insert element
                             }
                         }
-                        Mode::Nix2Yang => {
+                        ConvertMode::Nix2Yang => {
 
                             let mut a = vec![];
 
