@@ -9,16 +9,26 @@ use yang2::data::{
     DataTree, DataValidationFlags,
 };
 
-static SEARCH_DIR: &str = "./assets/yang/";
-
 fn main() -> std::io::Result<()> {
 
-    let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read("settings.json")?).unwrap();
+    let mut args = std::env::args();
+
+    drop(args.next());
+
+    let mode = match args.next().as_ref().map(|x| x.as_str()) {
+        Some("yang2nix") => {},
+        Some("nix2yang") => {},
+        _ => panic!("mode: yang2nix nix2yang"),
+    };
+
+    let file = args.next().expect("filename");
+
+    let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
     // Initialize context.
     let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY)
         .expect("Failed to create context");
-    ctx.set_searchdir(SEARCH_DIR)
+    ctx.set_searchdir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
         .expect("Failed to set YANG search directory");
     
     let module = ctx.load_module("rtbrick-config", None, &[])
