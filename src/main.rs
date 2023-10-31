@@ -213,7 +213,7 @@ fn main() -> std::io::Result<()> {
                                 let mut p2 = &mut *e; // reference to the value where the element will be inserted
                                 for key in &key_names {
                                     let k = el.as_object_mut().expect("expected an object").remove(key).expect("expected key");
-                                    let k = k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| n.as_i64()).map(|n| n.to_string())).expect("can not determine key");
+                                    let k = k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| serde_json::to_string(n).ok())).expect("can not determine key");
 
                                     if !p2.is_object() { *p2 = serde_json::Value::Object(Default::default()); };
                                     p2 = p2.as_object_mut().unwrap().entry(k).or_insert(serde_json::Value::Null);
@@ -229,8 +229,22 @@ fn main() -> std::io::Result<()> {
 
                             while let Some((depth, mut el)) = q.pop() {
                                 if depth.len() == key_names.len() {
-                                    for (key, key_name) in depth.into_iter().zip(&key_names) {
-                                        el.as_object_mut().expect("expected object").insert(key_name.clone(), key.into());
+                                    for (key, key_name) in depth.into_iter().zip(node.list_keys()) {
+                                        let key = match key_name.base_type() {
+                                            Some(DataValueType::Int8
+                                              | DataValueType::Int16
+                                              | DataValueType::Int32
+                                              | DataValueType::Int64
+                                              | DataValueType::Uint8
+                                              | DataValueType::Uint16
+                                              | DataValueType::Uint32
+                                              | DataValueType::Uint64
+                                              | DataValueType::Dec64) => {
+                                                serde_json::from_str(&key).unwrap()
+                                            }
+                                            _ => serde_json::Value::from(key.to_string())
+                                        };
+                                        el.as_object_mut().expect("expected object").insert(key_name.name().to_string(), key);
                                     }
                                     a.push(el);
                                 } else {
