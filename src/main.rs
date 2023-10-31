@@ -1,14 +1,109 @@
 use std::sync::Arc;
+use yang2::schema::DataValueType;
 use yang2::schema::SchemaNodeKind;
+use yang2::schema::SchemaNode;
+use yang2::schema::SchemaModule;
 use yang2::context::{Context, ContextFlags};
 
 enum Mode {
+    NixOptions,
     Convert(ConvertMode),
 }
 
 enum ConvertMode {
     Nix2Yang,
     Yang2Nix,
+}
+
+fn print_nix_options(indent: &mut String, root: SchemaNode) {
+    let mut stack = vec![root];
+
+    while let Some(node) = stack.pop() {
+
+        //println!("{}}}", indent);
+        match node.kind() {
+            SchemaNodeKind::Container => {
+                if let Some(description) = node.description() {
+                    println!("\n{}# {}", indent, description);
+                }
+                println!("{}{} = {{", indent, node.name());
+                *indent += "  ";
+                for child in node.children() {
+                    print_nix_options(indent, child);
+                }
+                *indent = indent.chars().skip(2).collect();
+                println!("{}}};", indent);
+            }
+
+            SchemaNodeKind::List => {
+                println!("\n{}{} = lib.mkOption {{", indent, node.name());
+                *indent += "  ";
+                if let Some(description) = node.description() {
+                    println!("{}description = \"{}\";", indent, description);
+                };
+                println!("{}type = lib.types.listOf (lib.types.submodule {{\n", indent);
+                *indent += "  ";
+                println!("{}options = {{", indent);
+                *indent += "  ";
+                for child in node.children() {
+                    print_nix_options(indent, child);
+                }
+                *indent = indent.chars().skip(2).collect();
+                println!("\n{}}};", indent);
+                *indent = indent.chars().skip(2).collect();
+                println!("\n{}}});", indent);
+                *indent = indent.chars().skip(2).collect();
+                println!("{}}};", indent);
+            }
+
+            SchemaNodeKind::Choice => {
+                println!("\n{}{} = {{", indent, node.name());
+                *indent += "  ";
+                for child in node.children() {
+                    print_nix_options(indent, child);
+                }
+                *indent = indent.chars().skip(2).collect();
+                println!("{}}};", indent);
+            }
+
+            SchemaNodeKind::Case => {
+                println!("\n{}{} = {{", indent, node.name());
+                *indent += "  ";
+                for child in node.children() {
+                    print_nix_options(indent, child);
+                }
+                *indent = indent.chars().skip(2).collect();
+                println!("{}}};", indent);
+            }
+
+            SchemaNodeKind::Leaf | SchemaNodeKind::LeafList => {
+                println!("\n{}{} = lib.mkOption {{", indent, node.name());
+                if let Some(description) = node.description() {
+                    println!("{}  description = \"{}\";", indent, description);
+                };
+                let leaf_type = match node.base_type() {
+                    Some(DataValueType::Enum) => "lib.types.str",
+                    Some(DataValueType::Union) => "lib.types.unspecified",
+                    Some(DataValueType::String) => "lib.types.str",
+                    Some(DataValueType::Int8) => "lib.types.ints.s8",
+                    Some(DataValueType::Uint8) => "lib.types.ints.u8",
+                    Some(DataValueType::Uint16) => "lib.types.ints.u16",
+                    Some(DataValueType::Uint32) => "lib.types.ints.u32",
+                    Some(DataValueType::Uint64) => "lib.types.ints.unsigned",
+                    Some(DataValueType::Dec64) => "lib.types.number",
+                    other => todo!("{:?}", other),
+                };
+                match node.kind() {
+                    SchemaNodeKind::Leaf if !node.is_mandatory() => println!("{}  type = lib.types.nullOr {};", indent, leaf_type),
+                    SchemaNodeKind::Leaf => println!("{}  type = {};", indent, leaf_type),
+                    SchemaNodeKind::LeafList => println!("{}  type = lib.types.listOf {};", indent, leaf_type),
+                    _ => unreachable!(),
+                }
+                println!("{}}};", indent);
+            }
+            other => todo!("{:?}", other)
+        }
+    }
 }
 
 fn main() -> std::io::Result<()> {
@@ -20,6 +115,7 @@ fn main() -> std::io::Result<()> {
     let mode = match args.next().as_ref().map(|x| x.as_str()) {
         Some("yang2nix") => Mode::Convert(ConvertMode::Yang2Nix),
         Some("nix2yang") => Mode::Convert(ConvertMode::Nix2Yang),
+        Some("nix_options") => Mode::NixOptions,
         _ => panic!("mode: yang2nix nix2yang"),
     };
 
@@ -40,6 +136,13 @@ fn main() -> std::io::Result<()> {
 
     let mode = match mode {
         Mode::Convert(mode) => mode,
+        Mode::NixOptions => {
+            let mut indent = "".to_string();
+            for root in roots {
+                print_nix_options(&mut indent, root);
+            }
+            std::process::exit(0);
+        }
     };
 
     let file = args.next().expect("filename");
