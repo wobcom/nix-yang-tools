@@ -226,7 +226,7 @@ fn main() -> std::io::Result<()> {
 
     let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
-    for node in roots.flat_map(|root| root.traverse())
+    for node in roots.flat_map(|root| root.traverse().collect::<Vec<_>>().into_iter().rev())
         // only lists that have keys
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
     {
@@ -252,7 +252,7 @@ fn main() -> std::io::Result<()> {
 
                 // last node ; convert
                 //println!("{:?} {:?}", node.path(SchemaPathFormat::DATA), key);
-                for e in p {
+                for e in &mut p {
 
                     match mode {
                         ConvertMode::Yang2Nix => {
@@ -261,7 +261,7 @@ fn main() -> std::io::Result<()> {
                             } else { panic!("Expected an array. Are you sure this is a YANG-style file?") };
 
                             for mut el in as_array {
-                                let mut p2 = &mut *e; // reference to the value where the element will be inserted
+                                let mut p2 = &mut **e; // reference to the value where the element will be inserted
                                 for key in &key_names {
                                     let k = el.as_object_mut().expect("expected an object").remove(key).expect("expected key");
                                     let k = k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| serde_json::to_string(n).ok())).expect("can not determine key");
@@ -312,7 +312,7 @@ fn main() -> std::io::Result<()> {
                                 }
                             }
 
-                            *e = serde_json::Value::Array(a);
+                            **e = serde_json::Value::Array(a);
                         }
                     }
 
