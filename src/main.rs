@@ -2,7 +2,6 @@ use std::sync::Arc;
 use yang2::schema::DataValueType;
 use yang2::schema::SchemaNodeKind;
 use yang2::schema::SchemaNode;
-use yang2::schema::SchemaModule;
 use yang2::context::{Context, ContextFlags};
 
 enum Mode {
@@ -38,20 +37,40 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
             SchemaNodeKind::List => {
                 println!("\n{}{} = lib.mkOption {{", indent, node.name());
                 *indent += "  ";
+
+                println!("{}description = ''", indent);
                 if let Some(description) = node.description() {
-                    println!("{}description = \"{}\";", indent, description);
-                };
-                println!("{}type = lib.types.listOf (lib.types.submodule {{\n", indent);
+                    println!("{}  {}", indent, description);
+                }
+                for (i, key) in node.list_keys().enumerate() {
+                    println!("{}  Key {}: {}", indent, i + 1, key.name());
+                }
+                println!("{}'';", indent);
+
+                print!("{}type = ", indent);
+                for key in node.list_keys() {
+                    print!("lib.types.attrsOf (");
+                }
+                println!("lib.types.submodule {{\n");
                 *indent += "  ";
                 println!("{}options = {{", indent);
                 *indent += "  ";
+
                 for child in node.children() {
-                    print_nix_options(indent, child);
+                    if !child.is_list_key() {
+                        print_nix_options(indent, child);
+                    }
                 }
+
                 *indent = indent.chars().skip(2).collect();
                 println!("\n{}}};", indent);
                 *indent = indent.chars().skip(2).collect();
-                println!("\n{}}});", indent);
+                print!("\n{}}}", indent);
+                for key in node.list_keys() {
+                    print!(")");
+                }
+                println!(";");
+                println!("\n{}default = {{}};", indent);
                 *indent = indent.chars().skip(2).collect();
                 println!("{}}};", indent);
             }
@@ -83,7 +102,7 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                 };
                 let leaf_type = match node.base_type() {
                     Some(DataValueType::Enum) => "lib.types.str",
-                    Some(DataValueType::Union) => "lib.types.unspecified",
+                    Some(DataValueType::Union) => "lib.types.str",
                     Some(DataValueType::String) => "lib.types.str",
                     Some(DataValueType::Int8) => "lib.types.ints.s8",
                     Some(DataValueType::Uint8) => "lib.types.ints.u8",
@@ -98,6 +117,11 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                     SchemaNodeKind::Leaf => println!("{}  type = {};", indent, leaf_type),
                     SchemaNodeKind::LeafList => println!("{}  type = lib.types.listOf {};", indent, leaf_type),
                     _ => unreachable!(),
+                }
+                match node.kind() {
+                    SchemaNodeKind::Leaf if !node.is_mandatory() => println!("{}  default = null;", indent),
+                    SchemaNodeKind::LeafList => println!("{}  default = [];", indent),
+                    _ => {}
                 }
                 println!("{}}};", indent);
             }
@@ -137,10 +161,12 @@ fn main() -> std::io::Result<()> {
     let mode = match mode {
         Mode::Convert(mode) => mode,
         Mode::NixOptions => {
-            let mut indent = "".to_string();
+            println!("{{ lib, ... }}: {{");
+            let mut indent = "  ".to_string();
             for root in roots {
                 print_nix_options(&mut indent, root);
             }
+            println!("}}");
             std::process::exit(0);
         }
     };
