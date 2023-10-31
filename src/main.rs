@@ -36,6 +36,8 @@ fn main() -> std::io::Result<()> {
 
     let module = ctx.get_module_latest("rtbrick-config").unwrap();
 
+    let roots = module.data();
+
     let mode = match mode {
         Mode::Convert(mode) => mode,
     };
@@ -44,7 +46,7 @@ fn main() -> std::io::Result<()> {
 
     let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
-    for node in module.traverse()
+    for node in roots.flat_map(|root| root.traverse())
         // only lists that have keys
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
     {
