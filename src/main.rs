@@ -7,6 +7,7 @@ use yang2::context::{Context, ContextFlags};
 enum Mode {
     NixOptions,
     Convert(ConvertMode),
+    Diff,
 }
 
 enum ConvertMode {
@@ -140,6 +141,7 @@ fn main() -> std::io::Result<()> {
         Some("yang2nix") => Mode::Convert(ConvertMode::Yang2Nix),
         Some("nix2yang") => Mode::Convert(ConvertMode::Nix2Yang),
         Some("nix_options") => Mode::NixOptions,
+        Some("diff") => Mode::Diff,
         _ => panic!("mode: yang2nix nix2yang"),
     };
 
@@ -148,7 +150,7 @@ fn main() -> std::io::Result<()> {
         .expect("Failed to create context");
     ctx.set_searchdir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
         .expect("Failed to set YANG search directory");
-    
+
     ctx.load_module("rtbrick-config", None, &[])
         .expect("Failed to load module");
 
@@ -167,6 +169,55 @@ fn main() -> std::io::Result<()> {
                 print_nix_options(&mut indent, root);
             }
             println!("}}");
+            std::process::exit(0);
+        }
+        Mode::Diff => {
+            use yang2::data::{
+                Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags,
+                DataTree, DataValidationFlags,
+            };
+
+            let filename1 = args.next().expect("filename1");
+            let filename2 = args.next().expect("filename2");
+            let file1 = std::fs::File::open(filename1)?;
+            let file2 = std::fs::File::open(filename2)?;
+
+            // Parse data trees from JSON strings.
+            let dtree1 = DataTree::parse_file(
+                &ctx,
+                file1,
+                DataFormat::JSON,
+                DataParserFlags::NO_VALIDATION,
+                DataValidationFlags::empty(),
+            )
+            .expect("Failed to parse data tree");
+
+            let dtree2 = DataTree::parse_file(
+                &ctx,
+                file2,
+                DataFormat::JSON,
+                DataParserFlags::NO_VALIDATION,
+                DataValidationFlags::empty(),
+            )
+            .expect("Failed to parse data tree");
+
+            // Compare data trees.
+            println!("Comparing data trees (JSON output):");
+            let diff = dtree1
+                .diff(&dtree2, DataDiffFlags::empty())
+                .expect("Failed to compare data trees");
+            diff.print_file(
+                std::io::stdout(),
+                DataFormat::JSON,
+                DataPrinterFlags::WITH_SIBLINGS,
+            )
+            .expect("Failed to print data diff");
+
+            println!("Comparing data trees (manual iteration):");
+            for (op, dnode) in diff.iter() {
+                println!(" {:?}: {} ({:?})", op, dnode.path(), dnode.value());
+            }
+
             std::process::exit(0);
         }
     };
