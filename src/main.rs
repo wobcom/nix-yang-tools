@@ -131,6 +131,20 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
     }
 }
 
+fn set_color(op: yang2::data::DataDiffOp) {
+    match op {
+        yang2::data::DataDiffOp::Create => {
+            print!("\x1b[92m+ ");
+        }
+        yang2::data::DataDiffOp::Delete => {
+            print!("\x1b[91m- ");
+        }
+        yang2::data::DataDiffOp::Replace => {
+            print!("\x1b[93m~ ");
+        }
+    }
+}
+
 fn main() -> std::io::Result<()> {
 
     let mut args = std::env::args();
@@ -202,20 +216,39 @@ fn main() -> std::io::Result<()> {
             .expect("Failed to parse data tree");
 
             // Compare data trees.
-            println!("Comparing data trees (JSON output):");
             let diff = dtree1
                 .diff(&dtree2, DataDiffFlags::empty())
                 .expect("Failed to compare data trees");
-            diff.print_file(
-                std::io::stdout(),
-                DataFormat::JSON,
-                DataPrinterFlags::WITH_SIBLINGS,
-            )
-            .expect("Failed to print data diff");
 
-            println!("Comparing data trees (manual iteration):");
+            let dtree1_root = dtree1.reference().unwrap();
+            let dtree2_root = dtree2.reference().unwrap();
+
             for (op, dnode) in diff.iter() {
-                println!(" {:?}: {} ({:?})", op, dnode.path(), dnode.value());
+
+                set_color(op);
+                println!("{:?} @{}", op, dnode.path());
+                let mut diffs_to_print = match op {
+                    yang2::data::DataDiffOp::Replace => vec![
+                        (yang2::data::DataDiffOp::Delete, dtree1_root.find_path(&dnode.path()).unwrap()),
+                        (yang2::data::DataDiffOp::Create, dtree2_root.find_path(&dnode.path()).unwrap()),
+                    ],
+                    yang2::data::DataDiffOp::Delete => vec![(op, dtree1_root.find_path(&dnode.path()).unwrap())],
+                    yang2::data::DataDiffOp::Create => vec![(op, dtree2_root.find_path(&dnode.path()).unwrap())],
+                };
+
+                for (op, dnode) in diffs_to_print {
+                    let diff_str = dnode.print_string(
+                        DataFormat::JSON,
+                        DataPrinterFlags::empty(),
+                    )
+                        .expect("Failed to print data diff")
+                        .unwrap();
+                    for line in diff_str.lines() {
+                        set_color(op);
+                        println!("{}", line);
+                    }
+                }
+                println!();
             }
 
             std::process::exit(0);
