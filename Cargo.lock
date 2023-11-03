@@ -139,9 +139,9 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "yang2"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2184f398896e112fadb9a06ed259d4ef16aed6fca5d03cf3b44eb947c04c747"
+checksum = "8d014ea8397ac38d1ead6a01009b608290f33718d37492b471647a82f26b1d5a"
 dependencies = [
  "bitflags",
  "libyang2-sys",

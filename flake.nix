@@ -7,7 +7,7 @@
   outputs = { self, nixpkgs, flake-utils }: {
     overlays.default = final: prev: rec {
       nix-yang-tools = final.callPackage (
-        { rustPlatform, libyang }:
+        { rustPlatform, pkg-config, libyang }:
 
         rustPlatform.buildRustPackage {
           pname = "nix-yang-tools";
@@ -15,7 +15,8 @@
 
           src = self;
 
-          NIX_LDFLAGS = "-L ${libyang}/lib";
+          nativeBuildInputs = [ pkg-config ];
+          buildInputs = [ libyang ];
 
           cargoLock.lockFile = ./Cargo.lock;
         }
