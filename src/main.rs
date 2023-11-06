@@ -220,8 +220,8 @@ fn main() -> std::io::Result<()> {
                 .diff(&dtree2, DataDiffFlags::empty())
                 .expect("Failed to compare data trees");
 
-            let dtree1_root = dtree1.reference().unwrap();
-            let dtree2_root = dtree2.reference().unwrap();
+            let dtree1_root = dtree1.reference();
+            let dtree2_root = dtree2.reference();
 
             for (op, dnode) in diff.iter() {
 
@@ -229,11 +229,11 @@ fn main() -> std::io::Result<()> {
                 println!("{:?} @{}", op, dnode.path());
                 let mut diffs_to_print = match op {
                     yang2::data::DataDiffOp::Replace => vec![
-                        (yang2::data::DataDiffOp::Delete, dtree1_root.find_path(&dnode.path()).unwrap()),
-                        (yang2::data::DataDiffOp::Create, dtree2_root.find_path(&dnode.path()).unwrap()),
+                        (yang2::data::DataDiffOp::Delete, dtree1_root.as_ref().unwrap().find_path(&dnode.path()).unwrap()),
+                        (yang2::data::DataDiffOp::Create, dtree2_root.as_ref().unwrap().find_path(&dnode.path()).unwrap()),
                     ],
-                    yang2::data::DataDiffOp::Delete => vec![(op, dtree1_root.find_path(&dnode.path()).unwrap())],
-                    yang2::data::DataDiffOp::Create => vec![(op, dtree2_root.find_path(&dnode.path()).unwrap())],
+                    yang2::data::DataDiffOp::Delete => vec![(op, dtree1_root.as_ref().unwrap().find_path(&dnode.path()).unwrap())],
+                    yang2::data::DataDiffOp::Create => vec![(op, dtree2_root.as_ref().unwrap().find_path(&dnode.path()).unwrap())],
                 };
 
                 for (op, dnode) in diffs_to_print {
