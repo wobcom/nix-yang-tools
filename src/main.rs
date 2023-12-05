@@ -291,7 +291,7 @@ fn main() -> std::io::Result<()> {
                         ConvertMode::Yang2Nix => {
                             let as_array = if let serde_json::Value::Array(a) = e.take() {
                                 a
-                            } else { panic!("Expected an array. Are you sure this is a YANG-style file?") };
+                            } else { panic!("At {}\nExpected an array, got {:?}. Are you sure this is a YANG-style file?", an.name(), e) };
 
                             for mut el in as_array {
                                 let mut p2 = &mut **e; // reference to the value where the element will be inserted
@@ -336,7 +336,7 @@ fn main() -> std::io::Result<()> {
                                     //println!("{:?}", el);
                                     let as_object = if let serde_json::Value::Object(o) = el.take() {
                                         o
-                                    } else { panic!("Expected an object. Are you sure this is a Nix-style file?"); };
+                                    } else { panic!("At {}\nExpected an object, got {:?}. Are you sure this is a Nix-style file?", an.name(), el); };
                                     for (key, el2) in as_object {
                                         let mut depth = depth.clone();
                                         depth.push(key);
