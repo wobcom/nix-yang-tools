@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::BufReader;
 use std::sync::Arc;
 use yang2::context::{Context, ContextFlags};
 use yang2::schema::DataValueType;
@@ -6,8 +8,8 @@ use yang2::schema::SchemaNodeKind;
 
 enum Mode {
     NixOptions,
-    Convert(ConvertMode),
-    Diff,
+    Convert(ConvertMode, File),
+    Diff(File, File),
 }
 
 enum ConvertMode {
@@ -156,10 +158,19 @@ fn main() -> std::io::Result<()> {
     drop(args.next());
 
     let mode = match args.next().as_ref().map(|x| x.as_str()) {
-        Some("yang2nix") => Mode::Convert(ConvertMode::Yang2Nix),
-        Some("nix2yang") => Mode::Convert(ConvertMode::Nix2Yang),
+        Some("yang2nix") => Mode::Convert(
+            ConvertMode::Yang2Nix,
+            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
+        ),
+        Some("nix2yang") => Mode::Convert(
+            ConvertMode::Nix2Yang,
+            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
+        ),
         Some("nix_options") => Mode::NixOptions,
-        Some("diff") => Mode::Diff,
+        Some("diff") => Mode::Diff(
+            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
+            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
+        ),
         _ => panic!("mode: yang2nix nix2yang"),
     };
 
@@ -181,8 +192,8 @@ fn main() -> std::io::Result<()> {
 
     let roots = module.data();
 
-    let mode = match mode {
-        Mode::Convert(mode) => mode,
+    let (mode, file) = match mode {
+        Mode::Convert(mode, file) => (mode, file),
         Mode::NixOptions => {
             println!("{{ lib, ... }}: {{");
             let mut indent = "  ".to_string();
@@ -192,16 +203,11 @@ fn main() -> std::io::Result<()> {
             println!("}}");
             std::process::exit(0);
         }
-        Mode::Diff => {
+        Mode::Diff(file1, file2) => {
             use yang2::data::{
                 Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags, DataTree,
                 DataValidationFlags,
             };
-
-            let filename1 = args.next().expect("filename1");
-            let filename2 = args.next().expect("filename2");
-            let file1 = std::fs::File::open(filename1)?;
-            let file2 = std::fs::File::open(filename2)?;
 
             // Parse data trees from JSON strings.
             let dtree1 = DataTree::parse_file(
@@ -287,9 +293,7 @@ fn main() -> std::io::Result<()> {
         }
     };
 
-    let file = args.next().expect("filename");
-
-    let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
+    let mut data: serde_json::Value = serde_json::from_reader(BufReader::new(file))?;
 
     for node in roots
         .flat_map(|root| root.traverse().collect::<Vec<_>>().into_iter().rev())
