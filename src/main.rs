@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use yang2::schema::DataValueType;
-use yang2::schema::SchemaNodeKind;
-use yang2::schema::SchemaNode;
 use yang2::context::{Context, ContextFlags};
+use yang2::schema::DataValueType;
+use yang2::schema::SchemaNode;
+use yang2::schema::SchemaNodeKind;
 
 enum Mode {
     NixOptions,
@@ -19,7 +19,6 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
     let mut stack = vec![root];
 
     while let Some(node) = stack.pop() {
-
         //println!("{}}}", indent);
         match node.kind() {
             SchemaNodeKind::Container => {
@@ -114,19 +113,25 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                     other => todo!("{:?}", other),
                 };
                 match node.kind() {
-                    SchemaNodeKind::Leaf if !node.is_mandatory() => println!("{}  type = lib.types.nullOr {};", indent, leaf_type),
+                    SchemaNodeKind::Leaf if !node.is_mandatory() => {
+                        println!("{}  type = lib.types.nullOr {};", indent, leaf_type)
+                    }
                     SchemaNodeKind::Leaf => println!("{}  type = {};", indent, leaf_type),
-                    SchemaNodeKind::LeafList => println!("{}  type = lib.types.listOf {};", indent, leaf_type),
+                    SchemaNodeKind::LeafList => {
+                        println!("{}  type = lib.types.listOf {};", indent, leaf_type)
+                    }
                     _ => unreachable!(),
                 }
                 match node.kind() {
-                    SchemaNodeKind::Leaf if !node.is_mandatory() => println!("{}  default = null;", indent),
+                    SchemaNodeKind::Leaf if !node.is_mandatory() => {
+                        println!("{}  default = null;", indent)
+                    }
                     SchemaNodeKind::LeafList => println!("{}  default = [];", indent),
                     _ => {}
                 }
                 println!("{}}};", indent);
             }
-            other => todo!("{:?}", other)
+            other => todo!("{:?}", other),
         }
     }
 }
@@ -146,7 +151,6 @@ fn set_color(op: yang2::data::DataDiffOp) {
 }
 
 fn main() -> std::io::Result<()> {
-
     let mut args = std::env::args();
 
     drop(args.next());
@@ -159,10 +163,10 @@ fn main() -> std::io::Result<()> {
         _ => panic!("mode: yang2nix nix2yang"),
     };
 
-    std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR")).expect("Failed to set YANG search directory");
+    std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
+        .expect("Failed to set YANG search directory");
     // Initialize context.
-    let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY)
-        .expect("Failed to create context");
+    let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY).expect("Failed to create context");
 
     ctx.load_module("rtbrick-config", None, &[])
         .expect("Failed to load module");
@@ -190,8 +194,8 @@ fn main() -> std::io::Result<()> {
         }
         Mode::Diff => {
             use yang2::data::{
-                Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags,
-                DataTree, DataValidationFlags,
+                Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags, DataTree,
+                DataValidationFlags,
             };
 
             let filename1 = args.next().expect("filename1");
@@ -227,23 +231,48 @@ fn main() -> std::io::Result<()> {
             let dtree2_root = dtree2.reference();
 
             for (op, dnode) in diff.iter() {
-
                 set_color(op);
                 println!("{:?} @{}", op, dnode.path());
                 let diffs_to_print = match op {
                     yang2::data::DataDiffOp::Replace => vec![
-                        (yang2::data::DataDiffOp::Delete, dtree1_root.as_ref().unwrap().find_path(&dnode.path()).unwrap()),
-                        (yang2::data::DataDiffOp::Create, dtree2_root.as_ref().unwrap().find_path(&dnode.path()).unwrap()),
+                        (
+                            yang2::data::DataDiffOp::Delete,
+                            dtree1_root
+                                .as_ref()
+                                .unwrap()
+                                .find_path(&dnode.path())
+                                .unwrap(),
+                        ),
+                        (
+                            yang2::data::DataDiffOp::Create,
+                            dtree2_root
+                                .as_ref()
+                                .unwrap()
+                                .find_path(&dnode.path())
+                                .unwrap(),
+                        ),
                     ],
-                    yang2::data::DataDiffOp::Delete => vec![(op, dtree1_root.as_ref().unwrap().find_path(&dnode.path()).unwrap())],
-                    yang2::data::DataDiffOp::Create => vec![(op, dtree2_root.as_ref().unwrap().find_path(&dnode.path()).unwrap())],
+                    yang2::data::DataDiffOp::Delete => vec![(
+                        op,
+                        dtree1_root
+                            .as_ref()
+                            .unwrap()
+                            .find_path(&dnode.path())
+                            .unwrap(),
+                    )],
+                    yang2::data::DataDiffOp::Create => vec![(
+                        op,
+                        dtree2_root
+                            .as_ref()
+                            .unwrap()
+                            .find_path(&dnode.path())
+                            .unwrap(),
+                    )],
                 };
 
                 for (op, dnode) in diffs_to_print {
-                    let diff_str = dnode.print_string(
-                        DataFormat::JSON,
-                        DataPrinterFlags::empty(),
-                    )
+                    let diff_str = dnode
+                        .print_string(DataFormat::JSON, DataPrinterFlags::empty())
                         .expect("Failed to print data diff")
                         .unwrap();
                     for line in diff_str.lines() {
@@ -262,14 +291,23 @@ fn main() -> std::io::Result<()> {
 
     let mut data: serde_json::Value = serde_json::from_slice(&std::fs::read(file)?).unwrap();
 
-    for node in roots.flat_map(|root| root.traverse().collect::<Vec<_>>().into_iter().rev())
+    for node in roots
+        .flat_map(|root| root.traverse().collect::<Vec<_>>().into_iter().rev())
         // only lists that have keys
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
     {
-        let key_names = node.list_keys().map(|ch| format!("{}", ch.name())).collect::<Vec<_>>();
+        let key_names = node
+            .list_keys()
+            .map(|ch| format!("{}", ch.name()))
+            .collect::<Vec<_>>();
         let mut p = vec![&mut data];
 
-        let mut ancestors = node.inclusive_ancestors().collect::<Vec<_>>().into_iter().rev().enumerate();
+        let mut ancestors = node
+            .inclusive_ancestors()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .enumerate();
         let ancestors_len = ancestors.len();
 
         for (i, an) in &mut ancestors {
@@ -279,37 +317,58 @@ fn main() -> std::io::Result<()> {
                 format!("{}", an.name())
             };
 
-            p = p.into_iter().flat_map(|x| x.get_mut(&k).into_iter()).collect();
+            p = p
+                .into_iter()
+                .flat_map(|x| x.get_mut(&k).into_iter())
+                .collect();
 
             // last ancestor
             if i == (ancestors_len - 1) {
                 // we didn't find anything
-                if p.len() == 0 { break; }
+                if p.len() == 0 {
+                    break;
+                }
 
                 // last node ; convert
                 //println!("{:?} {:?}", node.path(SchemaPathFormat::DATA), key);
                 for e in &mut p {
-
                     match mode {
                         ConvertMode::Yang2Nix => {
                             let as_array = if let serde_json::Value::Array(a) = e.take() {
                                 a
-                            } else { panic!("Expected an array. Are you sure this is a YANG-style file?") };
+                            } else {
+                                panic!("Expected an array. Are you sure this is a YANG-style file?")
+                            };
 
                             for mut el in as_array {
                                 let mut p2 = &mut **e; // reference to the value where the element will be inserted
                                 for key in &key_names {
-                                    let k = el.as_object_mut().expect("expected an object").remove(key).expect("expected key");
-                                    let k = k.as_str().map(|s| s.to_string()).or(k.as_number().and_then(|n| serde_json::to_string(n).ok())).expect("can not determine key");
+                                    let k = el
+                                        .as_object_mut()
+                                        .expect("expected an object")
+                                        .remove(key)
+                                        .expect("expected key");
+                                    let k = k
+                                        .as_str()
+                                        .map(|s| s.to_string())
+                                        .or(k
+                                            .as_number()
+                                            .and_then(|n| serde_json::to_string(n).ok()))
+                                        .expect("can not determine key");
 
-                                    if !p2.is_object() { *p2 = serde_json::Value::Object(Default::default()); };
-                                    p2 = p2.as_object_mut().unwrap().entry(k).or_insert(serde_json::Value::Null);
+                                    if !p2.is_object() {
+                                        *p2 = serde_json::Value::Object(Default::default());
+                                    };
+                                    p2 = p2
+                                        .as_object_mut()
+                                        .unwrap()
+                                        .entry(k)
+                                        .or_insert(serde_json::Value::Null);
                                 }
                                 *p2 = el; // insert element
                             }
                         }
                         ConvertMode::Nix2Yang => {
-
                             let mut a = vec![];
 
                             let mut q: Vec<(Vec<String>, _)> = vec![(vec![], e.take())];
@@ -318,28 +377,33 @@ fn main() -> std::io::Result<()> {
                                 if depth.len() == key_names.len() {
                                     for (key, key_name) in depth.into_iter().zip(node.list_keys()) {
                                         let key = match key_name.base_type() {
-                                            Some(DataValueType::Int8
-                                              | DataValueType::Int16
-                                              | DataValueType::Int32
-                                              | DataValueType::Int64
-                                              | DataValueType::Uint8
-                                              | DataValueType::Uint16
-                                              | DataValueType::Uint32
-                                              | DataValueType::Uint64
-                                              | DataValueType::Dec64) => {
-                                                serde_json::from_str(&key).unwrap()
-                                            }
-                                            _ => serde_json::Value::from(key.to_string())
+                                            Some(
+                                                DataValueType::Int8
+                                                | DataValueType::Int16
+                                                | DataValueType::Int32
+                                                | DataValueType::Int64
+                                                | DataValueType::Uint8
+                                                | DataValueType::Uint16
+                                                | DataValueType::Uint32
+                                                | DataValueType::Uint64
+                                                | DataValueType::Dec64,
+                                            ) => serde_json::from_str(&key).unwrap(),
+                                            _ => serde_json::Value::from(key.to_string()),
                                         };
-                                        el.as_object_mut().expect("expected object").insert(key_name.name().to_string(), key);
+                                        el.as_object_mut()
+                                            .expect("expected object")
+                                            .insert(key_name.name().to_string(), key);
                                     }
                                     a.push(el);
                                 } else {
                                     //println!("{:?}", depth);
                                     //println!("{:?}", el);
-                                    let as_object = if let serde_json::Value::Object(o) = el.take() {
+                                    let as_object = if let serde_json::Value::Object(o) = el.take()
+                                    {
                                         o
-                                    } else { panic!("Expected an object. Are you sure this is a Nix-style file?"); };
+                                    } else {
+                                        panic!("Expected an object. Are you sure this is a Nix-style file?");
+                                    };
                                     for (key, el2) in as_object {
                                         let mut depth = depth.clone();
                                         depth.push(key);
@@ -359,19 +423,23 @@ fn main() -> std::io::Result<()> {
             }
             if an.kind() == SchemaNodeKind::List {
                 for _ in an.list_keys() {
-                    p = p.into_iter().flat_map(|x| -> Box<dyn Iterator<Item = &mut serde_json::Value>> {
-                        match x {
-                            serde_json::Value::Array(a) => Box::new(a.into_iter()),
-                            serde_json::Value::Object(o) => Box::new(o.values_mut()),
-                            _ => panic!(),
-                        }
-                    }).collect();
+                    p = p
+                        .into_iter()
+                        .flat_map(|x| -> Box<dyn Iterator<Item = &mut serde_json::Value>> {
+                            match x {
+                                serde_json::Value::Array(a) => Box::new(a.into_iter()),
+                                serde_json::Value::Object(o) => Box::new(o.values_mut()),
+                                _ => panic!(),
+                            }
+                        })
+                        .collect();
                 }
             }
 
-            if p.len() == 0 { break; }
+            if p.len() == 0 {
+                break;
+            }
         }
-
     }
 
     println!("{}", serde_json::to_string(&data).unwrap());
