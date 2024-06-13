@@ -182,9 +182,9 @@ fn main() -> std::io::Result<()> {
     ctx.load_module("rtbrick-config", None, &[])
         .expect("Failed to load module");
 
-    for module in ctx.modules(false) {
-        eprintln!("loaded module {}@{:?}", module.name(), module.revision());
-    }
+    //for module in ctx.modules(false) {
+    //    eprintln!("loaded module {}@{:?}", module.name(), module.revision());
+    //}
 
     let ctx = Arc::new(ctx);
 
