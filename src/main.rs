@@ -159,14 +159,17 @@ fn main() -> std::io::Result<()> {
         _ => panic!("mode: yang2nix nix2yang"),
     };
 
+    std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR")).expect("Failed to set YANG search directory");
     // Initialize context.
     let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY)
         .expect("Failed to create context");
-    ctx.set_searchdir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
-        .expect("Failed to set YANG search directory");
 
     ctx.load_module("rtbrick-config", None, &[])
         .expect("Failed to load module");
+
+    for module in ctx.modules(false) {
+        eprintln!("loaded module {}@{:?}", module.name(), module.revision());
+    }
 
     let ctx = Arc::new(ctx);
 
@@ -227,7 +230,7 @@ fn main() -> std::io::Result<()> {
 
                 set_color(op);
                 println!("{:?} @{}", op, dnode.path());
-                let mut diffs_to_print = match op {
+                let diffs_to_print = match op {
                     yang2::data::DataDiffOp::Replace => vec![
                         (yang2::data::DataDiffOp::Delete, dtree1_root.as_ref().unwrap().find_path(&dnode.path()).unwrap()),
                         (yang2::data::DataDiffOp::Create, dtree2_root.as_ref().unwrap().find_path(&dnode.path()).unwrap()),
