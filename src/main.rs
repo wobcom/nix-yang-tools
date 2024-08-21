@@ -152,6 +152,10 @@ fn set_color(op: yang2::data::DataDiffOp) {
     }
 }
 
+fn reset_color() {
+    print!("\x1b[0m");
+}
+
 fn main() -> std::io::Result<()> {
     let mut args = std::env::args();
 
@@ -288,7 +292,7 @@ fn main() -> std::io::Result<()> {
                 }
                 println!();
             }
-
+            reset_color();
             std::process::exit(0);
         }
     };
