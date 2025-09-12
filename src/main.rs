@@ -3,6 +3,7 @@ use std::io::BufReader;
 use std::sync::Arc;
 use yang2::context::{Context, ContextFlags};
 use yang2::schema::DataValueType;
+use yang2::schema::SchemaLeafType;
 use yang2::schema::SchemaNode;
 use yang2::schema::SchemaNodeKind;
 
@@ -102,7 +103,7 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                 if let Some(description) = node.description() {
                     println!("{}  description = \"{}\";", indent, description);
                 };
-                let leaf_type = match node.base_type() {
+                let leaf_type = match node.leaf_type().as_ref().map(SchemaLeafType::base_type) {
                     Some(DataValueType::Enum) => "lib.types.str",
                     Some(DataValueType::Union) => "lib.types.str",
                     Some(DataValueType::String) => "lib.types.str",
@@ -384,7 +385,11 @@ fn main() -> std::io::Result<()> {
                             while let Some((depth, mut el)) = q.pop() {
                                 if depth.len() == key_names.len() {
                                     for (key, key_name) in depth.into_iter().zip(node.list_keys()) {
-                                        let key = match key_name.base_type() {
+                                        let key = match key_name
+                                            .leaf_type()
+                                            .as_ref()
+                                            .map(SchemaLeafType::base_type)
+                                        {
                                             Some(
                                                 DataValueType::Int8
                                                 | DataValueType::Int16
@@ -410,7 +415,9 @@ fn main() -> std::io::Result<()> {
                                     {
                                         o
                                     } else {
-                                        panic!("Expected an object. Are you sure this is a Nix-style file?");
+                                        panic!(
+                                            "Expected an object. Are you sure this is a Nix-style file?"
+                                        );
                                     };
                                     for (key, el2) in as_object {
                                         let mut depth = depth.clone();
