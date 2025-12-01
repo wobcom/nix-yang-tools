@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
 use clap::{Parser, Subcommand};
+use serde_json::value::RawValue as RawJsonValue;
 use yang2::context::{Context, ContextFlags};
 use yang2::schema::{DataValueType, SchemaLeafType, SchemaNode, SchemaNodeKind};
 
@@ -16,9 +17,18 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     NixOptions,
-    Nix2yang { input: PathBuf },
-    Yang2nix { input: PathBuf },
-    Diff { left: PathBuf, right: PathBuf },
+    Nix2yang {
+        input: PathBuf,
+    },
+    Yang2nix {
+        input: PathBuf,
+    },
+    Diff {
+        left: PathBuf,
+        right: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 enum ConvertMode {
@@ -156,15 +166,15 @@ fn print_nix_options_root(indent: &mut String, root: SchemaNode) {
     }
 }
 
-fn set_color(op: yang2::data::DataDiffOp) {
+fn set_color(op: &DataDiff) {
     match op {
-        yang2::data::DataDiffOp::Create => {
+        DataDiff::Create { .. } => {
             print!("\x1b[92m+ ");
         }
-        yang2::data::DataDiffOp::Delete => {
+        DataDiff::Delete { .. } => {
             print!("\x1b[91m- ");
         }
-        yang2::data::DataDiffOp::Replace => {
+        DataDiff::Replace { .. } => {
             print!("\x1b[93m~ ");
         }
     }
@@ -174,21 +184,75 @@ fn reset_color() {
     print!("\x1b[0m");
 }
 
+#[derive(serde::Serialize)]
+struct Hunk {
+    path: String,
+    diff: DataDiff,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "type")]
+enum DataDiff {
+    Delete {
+        delete: Box<RawJsonValue>,
+    },
+    Create {
+        create: Box<RawJsonValue>,
+    },
+    Replace {
+        delete: Box<RawJsonValue>,
+        create: Box<RawJsonValue>,
+    },
+}
+
+fn raw_value_at<'a>(tree: &yang2::data::DataTree<'a>, path: &str) -> Result<Box<RawJsonValue>> {
+    use yang2::data::{Data, DataFormat, DataPrinterFlags};
+    let dnode = tree.find_path(path).context("dtree path")?;
+    Ok(RawJsonValue::from_string(
+        dnode
+            .print_string(DataFormat::JSON, DataPrinterFlags::empty())
+            .context("printing data diff")?
+            .ok_or(anyhow!("expected diff str"))?,
+    )?)
+}
+
+fn diff_to_hunks<'a>(
+    diff: &'a yang2::data::DataDiff<'a>,
+    left: &'a yang2::data::DataTree<'a>,
+    right: &'a yang2::data::DataTree<'a>,
+) -> Result<impl Iterator<Item = Result<Hunk>> + 'a> {
+    Ok(diff.iter().map(move |(op, dnode)| {
+        let diff = match op {
+            yang2::data::DataDiffOp::Replace => DataDiff::Replace {
+                delete: raw_value_at(&left, &dnode.path()).context("replace get left value")?,
+                create: raw_value_at(&right, &dnode.path()).context("replace get right value")?,
+            },
+            yang2::data::DataDiffOp::Delete => DataDiff::Delete {
+                delete: raw_value_at(&left, &dnode.path()).context("delete get left value")?,
+            },
+            yang2::data::DataDiffOp::Create => DataDiff::Create {
+                create: raw_value_at(&right, &dnode.path()).context("create get right value")?,
+            },
+        };
+        Ok(Hunk {
+            path: dnode.path().to_string(),
+            diff,
+        })
+    }))
+}
+
 fn diff(
     ctx: &yang2::context::Context,
     left: impl AsRef<Path>,
     right: impl AsRef<Path>,
+    json: bool,
 ) -> Result<()> {
+    use yang2::data::{DataDiffFlags, DataFormat, DataParserFlags, DataTree, DataValidationFlags};
     let left = File::open(left)?;
     let right = File::open(right)?;
 
-    use yang2::data::{
-        Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags, DataTree,
-        DataValidationFlags,
-    };
-
     // Parse data trees from JSON strings.
-    let dtree1 = DataTree::parse_file(
+    let left_tree = DataTree::parse_file(
         ctx,
         left,
         DataFormat::JSON,
@@ -197,7 +261,7 @@ fn diff(
     )
     .context("parsing left data tree")?;
 
-    let dtree2 = DataTree::parse_file(
+    let right_tree = DataTree::parse_file(
         ctx,
         right,
         DataFormat::JSON,
@@ -207,50 +271,48 @@ fn diff(
     .context("parsing right data tree")?;
 
     // Compare data trees.
-    let diff = dtree1
-        .diff(&dtree2, DataDiffFlags::empty())
+    let diff = left_tree
+        .diff(&right_tree, DataDiffFlags::empty())
         .context("comparing data trees")?;
+    let hunks = diff_to_hunks(&diff, &left_tree, &right_tree)?;
 
-    let dtree1_root = dtree1.reference();
-    let dtree2_root = dtree2.reference();
-
-    for (op, dnode) in diff.iter() {
-        set_color(op);
-        println!("{:?} @{}", op, dnode.path());
-        let dtree1_root = dtree1_root.as_ref().ok_or(anyhow!("left dtree root"))?;
-        let dtree2_root = dtree2_root.as_ref().ok_or(anyhow!("left dtree root"))?;
-        let diffs_to_print = match op {
-            yang2::data::DataDiffOp::Replace => vec![
-                (
-                    yang2::data::DataDiffOp::Delete,
-                    dtree1_root.find_path(&dnode.path())?,
-                ),
-                (
-                    yang2::data::DataDiffOp::Create,
-                    dtree2_root.find_path(&dnode.path())?,
-                ),
-            ],
-            yang2::data::DataDiffOp::Delete => {
-                vec![(op, dtree1_root.find_path(&dnode.path())?)]
-            }
-            yang2::data::DataDiffOp::Create => {
-                vec![(op, dtree2_root.find_path(&dnode.path())?)]
-            }
-        };
-
-        for (op, dnode) in diffs_to_print {
-            let diff_str = dnode
-                .print_string(DataFormat::JSON, DataPrinterFlags::empty())
-                .context("printing data diff")?
-                .ok_or(anyhow!("expected diff str"))?;
-            for line in diff_str.lines() {
-                set_color(op);
-                println!("{}", line);
-            }
+    if json {
+        for hunk in hunks {
+            println!("{}", serde_json::to_string(&hunk?)?);
         }
-        println!();
+    } else {
+        for hunk in hunks {
+            let hunk = hunk?;
+            set_color(&hunk.diff);
+            match hunk.diff {
+                DataDiff::Replace { delete, create } => {
+                    println!("Replace @{}", hunk.path);
+                    let json = serde_json::to_string_pretty(&delete)?;
+                    set_color(&DataDiff::Delete { delete });
+                    println!("{}", json);
+                    let json = serde_json::to_string_pretty(&create)?;
+                    set_color(&DataDiff::Create { create });
+                    println!("{}", json);
+                }
+                DataDiff::Delete { delete } => {
+                    println!(
+                        "Delete @{}\n{}",
+                        hunk.path,
+                        serde_json::to_string_pretty(&delete)?
+                    );
+                }
+                DataDiff::Create { create } => {
+                    println!(
+                        "Create @{}\n{}",
+                        hunk.path,
+                        serde_json::to_string_pretty(&create)?
+                    );
+                }
+            }
+            println!();
+        }
+        reset_color();
     }
-    reset_color();
     Ok(())
 }
 
@@ -461,6 +523,6 @@ fn main() -> Result<()> {
         }
         Commands::Nix2yang { input } => convert(roots, ConvertMode::Nix2Yang, input),
         Commands::Yang2nix { input } => convert(roots, ConvertMode::Yang2Nix, input),
-        Commands::Diff { left, right } => diff(&ctx, left, right),
+        Commands::Diff { left, right, json } => diff(&ctx, left, right, json),
     }
 }
