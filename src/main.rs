@@ -68,7 +68,7 @@ fn print_nix_options_root(indent: &mut String, root: SchemaNode) {
                 println!("{}'';", indent);
 
                 print!("{}type = ", indent);
-                for key in node.list_keys() {
+                for _key in node.list_keys() {
                     print!("lib.types.attrsOf (");
                 }
                 println!("lib.types.submodule {{\n");
@@ -86,7 +86,7 @@ fn print_nix_options_root(indent: &mut String, root: SchemaNode) {
                 println!("\n{}}};", indent);
                 *indent = indent.chars().skip(2).collect();
                 print!("\n{}}}", indent);
-                for key in node.list_keys() {
+                for _key in node.list_keys() {
                     print!(")");
                 }
                 println!(";");
@@ -174,7 +174,7 @@ fn reset_color() {
     print!("\x1b[0m");
 }
 
-fn diff<'a>(
+fn diff(
     ctx: &yang2::context::Context,
     left: impl AsRef<Path>,
     right: impl AsRef<Path>,
@@ -189,7 +189,7 @@ fn diff<'a>(
 
     // Parse data trees from JSON strings.
     let dtree1 = DataTree::parse_file(
-        &ctx,
+        ctx,
         left,
         DataFormat::JSON,
         DataParserFlags::NO_VALIDATION,
@@ -198,7 +198,7 @@ fn diff<'a>(
     .context("parsing left data tree")?;
 
     let dtree2 = DataTree::parse_file(
-        &ctx,
+        ctx,
         right,
         DataFormat::JSON,
         DataParserFlags::NO_VALIDATION,
@@ -269,7 +269,7 @@ fn convert<'a>(
     {
         let key_names = node
             .list_keys()
-            .map(|ch| format!("{}", ch.name()))
+            .map(|ch| ch.name().to_string())
             .collect::<Vec<_>>();
         let mut p = vec![&mut data];
 
@@ -285,7 +285,7 @@ fn convert<'a>(
             let k = if i == 0 {
                 format!("rtbrick-config:{}", an.name())
             } else {
-                format!("{}", an.name())
+                an.name().to_string()
             };
 
             p = p
@@ -296,7 +296,7 @@ fn convert<'a>(
             // last ancestor
             if i == (ancestors_len - 1) {
                 // we didn't find anything
-                if p.len() == 0 {
+                if p.is_empty() {
                     break;
                 }
 
@@ -407,7 +407,7 @@ fn convert<'a>(
                         .flat_map(
                             |x| -> Box<dyn Iterator<Item = Result<&mut serde_json::Value>>> {
                                 match x {
-                                    serde_json::Value::Array(a) => Box::new(a.into_iter().map(Ok)),
+                                    serde_json::Value::Array(a) => Box::new(a.iter_mut().map(Ok)),
                                     serde_json::Value::Object(o) => {
                                         Box::new(o.values_mut().map(Ok))
                                     }
@@ -421,7 +421,7 @@ fn convert<'a>(
                 }
             }
 
-            if p.len() == 0 {
+            if p.is_empty() {
                 break;
             }
         }
@@ -455,7 +455,10 @@ fn main() -> Result<()> {
     let roots = module.data();
 
     match cli.command {
-        Commands::NixOptions => Ok(print_nix_options_roots(roots)),
+        Commands::NixOptions => {
+            print_nix_options_roots(roots);
+            Ok(())
+        }
         Commands::Nix2yang { input } => convert(roots, ConvertMode::Nix2Yang, input),
         Commands::Yang2nix { input } => convert(roots, ConvertMode::Yang2Nix, input),
         Commands::Diff { left, right } => diff(&ctx, left, right),
