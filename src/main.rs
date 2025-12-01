@@ -308,7 +308,9 @@ fn convert<'a>(
                             let as_array = if let serde_json::Value::Array(a) = e.take() {
                                 a
                             } else {
-                                panic!("Expected an array. Are you sure this is a YANG-style file?")
+                                anyhow::bail!(
+                                    "Expected an array. Are you sure this is a YANG-style file?"
+                                )
                             };
 
                             for mut el in as_array {
@@ -377,7 +379,7 @@ fn convert<'a>(
                                     {
                                         o
                                     } else {
-                                        panic!(
+                                        anyhow::bail!(
                                             "Expected an object. Are you sure this is a Nix-style file?"
                                         );
                                     };
@@ -402,14 +404,20 @@ fn convert<'a>(
                 for _ in an.list_keys() {
                     p = p
                         .into_iter()
-                        .flat_map(|x| -> Box<dyn Iterator<Item = &mut serde_json::Value>> {
-                            match x {
-                                serde_json::Value::Array(a) => Box::new(a.into_iter()),
-                                serde_json::Value::Object(o) => Box::new(o.values_mut()),
-                                _ => panic!(),
-                            }
-                        })
-                        .collect();
+                        .flat_map(
+                            |x| -> Box<dyn Iterator<Item = Result<&mut serde_json::Value>>> {
+                                match x {
+                                    serde_json::Value::Array(a) => Box::new(a.into_iter().map(Ok)),
+                                    serde_json::Value::Object(o) => {
+                                        Box::new(o.values_mut().map(Ok))
+                                    }
+                                    _ => Box::new(std::iter::once(Err(anyhow::anyhow!(
+                                        "expected object or array"
+                                    )))),
+                                }
+                            },
+                        )
+                        .collect::<Result<_>>()?;
                 }
             }
 
