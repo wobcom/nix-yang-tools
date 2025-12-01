@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use yang2::context::{Context, ContextFlags};
 use yang2::schema::{DataValueType, SchemaLeafType, SchemaNode, SchemaNodeKind};
@@ -177,7 +178,7 @@ fn diff<'a>(
     ctx: &yang2::context::Context,
     left: impl AsRef<Path>,
     right: impl AsRef<Path>,
-) -> std::io::Result<()> {
+) -> Result<()> {
     let left = File::open(left)?;
     let right = File::open(right)?;
 
@@ -273,7 +274,7 @@ fn convert<'a>(
     roots: impl IntoIterator<Item = SchemaNode<'a>>,
     mode: ConvertMode,
     input: impl AsRef<Path>,
-) -> std::io::Result<()> {
+) -> Result<()> {
     let mut data: serde_json::Value = serde_json::from_reader(BufReader::new(File::open(input)?))?;
 
     for node in roots
@@ -438,7 +439,7 @@ fn convert<'a>(
     Ok(())
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
