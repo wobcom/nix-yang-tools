@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result, anyhow};
 use clap::{Parser, Subcommand};
 use yang2::context::{Context, ContextFlags};
 use yang2::schema::{DataValueType, SchemaLeafType, SchemaNode, SchemaNodeKind};
@@ -195,7 +195,7 @@ fn diff<'a>(
         DataParserFlags::NO_VALIDATION,
         DataValidationFlags::empty(),
     )
-    .expect("Failed to parse data tree");
+    .context("parsing left data tree")?;
 
     let dtree2 = DataTree::parse_file(
         &ctx,
@@ -204,12 +204,12 @@ fn diff<'a>(
         DataParserFlags::NO_VALIDATION,
         DataValidationFlags::empty(),
     )
-    .expect("Failed to parse data tree");
+    .context("parsing right data tree")?;
 
     // Compare data trees.
     let diff = dtree1
         .diff(&dtree2, DataDiffFlags::empty())
-        .expect("Failed to compare data trees");
+        .context("comparing data trees")?;
 
     let dtree1_root = dtree1.reference();
     let dtree2_root = dtree2.reference();
@@ -217,48 +217,32 @@ fn diff<'a>(
     for (op, dnode) in diff.iter() {
         set_color(op);
         println!("{:?} @{}", op, dnode.path());
+        let dtree1_root = dtree1_root.as_ref().ok_or(anyhow!("left dtree root"))?;
+        let dtree2_root = dtree2_root.as_ref().ok_or(anyhow!("left dtree root"))?;
         let diffs_to_print = match op {
             yang2::data::DataDiffOp::Replace => vec![
                 (
                     yang2::data::DataDiffOp::Delete,
-                    dtree1_root
-                        .as_ref()
-                        .unwrap()
-                        .find_path(&dnode.path())
-                        .unwrap(),
+                    dtree1_root.find_path(&dnode.path())?,
                 ),
                 (
                     yang2::data::DataDiffOp::Create,
-                    dtree2_root
-                        .as_ref()
-                        .unwrap()
-                        .find_path(&dnode.path())
-                        .unwrap(),
+                    dtree2_root.find_path(&dnode.path())?,
                 ),
             ],
-            yang2::data::DataDiffOp::Delete => vec![(
-                op,
-                dtree1_root
-                    .as_ref()
-                    .unwrap()
-                    .find_path(&dnode.path())
-                    .unwrap(),
-            )],
-            yang2::data::DataDiffOp::Create => vec![(
-                op,
-                dtree2_root
-                    .as_ref()
-                    .unwrap()
-                    .find_path(&dnode.path())
-                    .unwrap(),
-            )],
+            yang2::data::DataDiffOp::Delete => {
+                vec![(op, dtree1_root.find_path(&dnode.path())?)]
+            }
+            yang2::data::DataDiffOp::Create => {
+                vec![(op, dtree2_root.find_path(&dnode.path())?)]
+            }
         };
 
         for (op, dnode) in diffs_to_print {
             let diff_str = dnode
                 .print_string(DataFormat::JSON, DataPrinterFlags::empty())
-                .expect("Failed to print data diff")
-                .unwrap();
+                .context("printing data diff")?
+                .ok_or(anyhow!("expected diff str"))?;
             for line in diff_str.lines() {
                 set_color(op);
                 println!("{}", line);
@@ -332,23 +316,23 @@ fn convert<'a>(
                                 for key in &key_names {
                                     let k = el
                                         .as_object_mut()
-                                        .expect("expected an object")
+                                        .ok_or(anyhow!("expected an object"))?
                                         .remove(key)
-                                        .expect("expected key");
+                                        .ok_or(anyhow!("expected key"))?;
                                     let k = k
                                         .as_str()
                                         .map(|s| s.to_string())
                                         .or(k
                                             .as_number()
                                             .and_then(|n| serde_json::to_string(n).ok()))
-                                        .expect("can not determine key");
+                                        .ok_or(anyhow!("can not determine key"))?;
 
                                     if !p2.is_object() {
                                         *p2 = serde_json::Value::Object(Default::default());
                                     };
                                     p2 = p2
                                         .as_object_mut()
-                                        .unwrap()
+                                        .ok_or(anyhow!("expected an object"))?
                                         .entry(k)
                                         .or_insert(serde_json::Value::Null);
                                 }
@@ -378,11 +362,11 @@ fn convert<'a>(
                                                 | DataValueType::Uint32
                                                 | DataValueType::Uint64
                                                 | DataValueType::Dec64,
-                                            ) => serde_json::from_str(&key).unwrap(),
+                                            ) => serde_json::from_str(&key)?,
                                             _ => serde_json::Value::from(key.to_string()),
                                         };
                                         el.as_object_mut()
-                                            .expect("expected object")
+                                            .ok_or(anyhow!("expected object"))?
                                             .insert(key_name.name().to_string(), key);
                                     }
                                     a.push(el);
@@ -435,26 +419,30 @@ fn convert<'a>(
         }
     }
 
-    println!("{}", serde_json::to_string(&data).unwrap());
+    println!("{}", serde_json::to_string(&data)?);
     Ok(())
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
-        .expect("Failed to set YANG search directory");
+    std::env::set_current_dir(
+        std::env::var("YANG_SCHEMAS_DIR").context("env var YANG_SCHEMAS_DIR")?,
+    )
+    .context("Failed to set YANG search directory")?;
     // Initialize context.
-    let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY).expect("Failed to create context");
+    let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY).context("Failed to create context")?;
 
     ctx.load_module("rtbrick-config", None, &[])
-        .expect("Failed to load module");
+        .context("Failed to load module")?;
 
     //for module in ctx.modules(false) {
     //    eprintln!("loaded module {}@{:?}", module.name(), module.revision());
     //}
 
-    let module = ctx.get_module_latest("rtbrick-config").unwrap();
+    let module = ctx
+        .get_module_latest("rtbrick-config")
+        .ok_or(anyhow!("rtbrick-config module"))?;
 
     let roots = module.data();
 
