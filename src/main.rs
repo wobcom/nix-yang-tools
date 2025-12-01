@@ -1,16 +1,23 @@
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Arc;
-use yang2::context::{Context, ContextFlags};
-use yang2::schema::DataValueType;
-use yang2::schema::SchemaLeafType;
-use yang2::schema::SchemaNode;
-use yang2::schema::SchemaNodeKind;
+use std::path::{Path, PathBuf};
 
-enum Mode {
+use clap::{Parser, Subcommand};
+use yang2::context::{Context, ContextFlags};
+use yang2::schema::{DataValueType, SchemaLeafType, SchemaNode, SchemaNodeKind};
+
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
     NixOptions,
-    Convert(ConvertMode, File),
-    Diff(File, File),
+    Nix2yang { input: PathBuf },
+    Yang2nix { input: PathBuf },
+    Diff { left: PathBuf, right: PathBuf },
 }
 
 enum ConvertMode {
@@ -18,7 +25,16 @@ enum ConvertMode {
     Yang2Nix,
 }
 
-fn print_nix_options(indent: &mut String, root: SchemaNode) {
+fn print_nix_options_roots<'a>(roots: impl IntoIterator<Item = SchemaNode<'a>>) {
+    println!("{{ lib, ... }}: {{");
+    let mut indent = "  ".to_string();
+    for root in roots {
+        print_nix_options_root(&mut indent, root);
+    }
+    println!("}}");
+}
+
+fn print_nix_options_root(indent: &mut String, root: SchemaNode) {
     let mut stack = vec![root];
 
     while let Some(node) = stack.pop() {
@@ -31,7 +47,7 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                 println!("{}{} = {{", indent, node.name());
                 *indent += "  ";
                 for child in node.children() {
-                    print_nix_options(indent, child);
+                    print_nix_options_root(indent, child);
                 }
                 *indent = indent.chars().skip(2).collect();
                 println!("{}}};", indent);
@@ -61,7 +77,7 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
 
                 for child in node.children() {
                     if !child.is_list_key() {
-                        print_nix_options(indent, child);
+                        print_nix_options_root(indent, child);
                     }
                 }
 
@@ -82,7 +98,7 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                 println!("\n{}{} = {{", indent, node.name());
                 *indent += "  ";
                 for child in node.children() {
-                    print_nix_options(indent, child);
+                    print_nix_options_root(indent, child);
                 }
                 *indent = indent.chars().skip(2).collect();
                 println!("{}}};", indent);
@@ -92,7 +108,7 @@ fn print_nix_options(indent: &mut String, root: SchemaNode) {
                 println!("\n{}{} = {{", indent, node.name());
                 *indent += "  ";
                 for child in node.children() {
-                    print_nix_options(indent, child);
+                    print_nix_options_root(indent, child);
                 }
                 *indent = indent.chars().skip(2).collect();
                 println!("{}}};", indent);
@@ -157,150 +173,111 @@ fn reset_color() {
     print!("\x1b[0m");
 }
 
-fn main() -> std::io::Result<()> {
-    let mut args = std::env::args();
+fn diff<'a>(
+    ctx: &yang2::context::Context,
+    left: impl AsRef<Path>,
+    right: impl AsRef<Path>,
+) -> std::io::Result<()> {
+    let left = File::open(left)?;
+    let right = File::open(right)?;
 
-    drop(args.next());
-
-    let mode = match args.next().as_ref().map(|x| x.as_str()) {
-        Some("yang2nix") => Mode::Convert(
-            ConvertMode::Yang2Nix,
-            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
-        ),
-        Some("nix2yang") => Mode::Convert(
-            ConvertMode::Nix2Yang,
-            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
-        ),
-        Some("nix_options") => Mode::NixOptions,
-        Some("diff") => Mode::Diff(
-            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
-            std::fs::File::open(&args.next().expect("filename")).expect("realpath"),
-        ),
-        _ => panic!("mode: yang2nix nix2yang"),
+    use yang2::data::{
+        Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags, DataTree,
+        DataValidationFlags,
     };
 
-    std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
-        .expect("Failed to set YANG search directory");
-    // Initialize context.
-    let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY).expect("Failed to create context");
+    // Parse data trees from JSON strings.
+    let dtree1 = DataTree::parse_file(
+        &ctx,
+        left,
+        DataFormat::JSON,
+        DataParserFlags::NO_VALIDATION,
+        DataValidationFlags::empty(),
+    )
+    .expect("Failed to parse data tree");
 
-    ctx.load_module("rtbrick-config", None, &[])
-        .expect("Failed to load module");
+    let dtree2 = DataTree::parse_file(
+        &ctx,
+        right,
+        DataFormat::JSON,
+        DataParserFlags::NO_VALIDATION,
+        DataValidationFlags::empty(),
+    )
+    .expect("Failed to parse data tree");
 
-    //for module in ctx.modules(false) {
-    //    eprintln!("loaded module {}@{:?}", module.name(), module.revision());
-    //}
+    // Compare data trees.
+    let diff = dtree1
+        .diff(&dtree2, DataDiffFlags::empty())
+        .expect("Failed to compare data trees");
 
-    let ctx = Arc::new(ctx);
+    let dtree1_root = dtree1.reference();
+    let dtree2_root = dtree2.reference();
 
-    let module = ctx.get_module_latest("rtbrick-config").unwrap();
+    for (op, dnode) in diff.iter() {
+        set_color(op);
+        println!("{:?} @{}", op, dnode.path());
+        let diffs_to_print = match op {
+            yang2::data::DataDiffOp::Replace => vec![
+                (
+                    yang2::data::DataDiffOp::Delete,
+                    dtree1_root
+                        .as_ref()
+                        .unwrap()
+                        .find_path(&dnode.path())
+                        .unwrap(),
+                ),
+                (
+                    yang2::data::DataDiffOp::Create,
+                    dtree2_root
+                        .as_ref()
+                        .unwrap()
+                        .find_path(&dnode.path())
+                        .unwrap(),
+                ),
+            ],
+            yang2::data::DataDiffOp::Delete => vec![(
+                op,
+                dtree1_root
+                    .as_ref()
+                    .unwrap()
+                    .find_path(&dnode.path())
+                    .unwrap(),
+            )],
+            yang2::data::DataDiffOp::Create => vec![(
+                op,
+                dtree2_root
+                    .as_ref()
+                    .unwrap()
+                    .find_path(&dnode.path())
+                    .unwrap(),
+            )],
+        };
 
-    let roots = module.data();
-
-    let (mode, file) = match mode {
-        Mode::Convert(mode, file) => (mode, file),
-        Mode::NixOptions => {
-            println!("{{ lib, ... }}: {{");
-            let mut indent = "  ".to_string();
-            for root in roots {
-                print_nix_options(&mut indent, root);
-            }
-            println!("}}");
-            std::process::exit(0);
-        }
-        Mode::Diff(file1, file2) => {
-            use yang2::data::{
-                Data, DataDiffFlags, DataFormat, DataParserFlags, DataPrinterFlags, DataTree,
-                DataValidationFlags,
-            };
-
-            // Parse data trees from JSON strings.
-            let dtree1 = DataTree::parse_file(
-                &ctx,
-                file1,
-                DataFormat::JSON,
-                DataParserFlags::NO_VALIDATION,
-                DataValidationFlags::empty(),
-            )
-            .expect("Failed to parse data tree");
-
-            let dtree2 = DataTree::parse_file(
-                &ctx,
-                file2,
-                DataFormat::JSON,
-                DataParserFlags::NO_VALIDATION,
-                DataValidationFlags::empty(),
-            )
-            .expect("Failed to parse data tree");
-
-            // Compare data trees.
-            let diff = dtree1
-                .diff(&dtree2, DataDiffFlags::empty())
-                .expect("Failed to compare data trees");
-
-            let dtree1_root = dtree1.reference();
-            let dtree2_root = dtree2.reference();
-
-            for (op, dnode) in diff.iter() {
+        for (op, dnode) in diffs_to_print {
+            let diff_str = dnode
+                .print_string(DataFormat::JSON, DataPrinterFlags::empty())
+                .expect("Failed to print data diff")
+                .unwrap();
+            for line in diff_str.lines() {
                 set_color(op);
-                println!("{:?} @{}", op, dnode.path());
-                let diffs_to_print = match op {
-                    yang2::data::DataDiffOp::Replace => vec![
-                        (
-                            yang2::data::DataDiffOp::Delete,
-                            dtree1_root
-                                .as_ref()
-                                .unwrap()
-                                .find_path(&dnode.path())
-                                .unwrap(),
-                        ),
-                        (
-                            yang2::data::DataDiffOp::Create,
-                            dtree2_root
-                                .as_ref()
-                                .unwrap()
-                                .find_path(&dnode.path())
-                                .unwrap(),
-                        ),
-                    ],
-                    yang2::data::DataDiffOp::Delete => vec![(
-                        op,
-                        dtree1_root
-                            .as_ref()
-                            .unwrap()
-                            .find_path(&dnode.path())
-                            .unwrap(),
-                    )],
-                    yang2::data::DataDiffOp::Create => vec![(
-                        op,
-                        dtree2_root
-                            .as_ref()
-                            .unwrap()
-                            .find_path(&dnode.path())
-                            .unwrap(),
-                    )],
-                };
-
-                for (op, dnode) in diffs_to_print {
-                    let diff_str = dnode
-                        .print_string(DataFormat::JSON, DataPrinterFlags::empty())
-                        .expect("Failed to print data diff")
-                        .unwrap();
-                    for line in diff_str.lines() {
-                        set_color(op);
-                        println!("{}", line);
-                    }
-                }
-                println!();
+                println!("{}", line);
             }
-            reset_color();
-            std::process::exit(0);
         }
-    };
+        println!();
+    }
+    reset_color();
+    Ok(())
+}
 
-    let mut data: serde_json::Value = serde_json::from_reader(BufReader::new(file))?;
+fn convert<'a>(
+    roots: impl IntoIterator<Item = SchemaNode<'a>>,
+    mode: ConvertMode,
+    input: impl AsRef<Path>,
+) -> std::io::Result<()> {
+    let mut data: serde_json::Value = serde_json::from_reader(BufReader::new(File::open(input)?))?;
 
     for node in roots
+        .into_iter()
         .flat_map(|root| root.traverse().collect::<Vec<_>>().into_iter().rev())
         // only lists that have keys
         .filter(|node| node.kind() == SchemaNodeKind::List && !node.is_keyless_list())
@@ -458,6 +435,32 @@ fn main() -> std::io::Result<()> {
     }
 
     println!("{}", serde_json::to_string(&data).unwrap());
-
     Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    let cli = Cli::parse();
+
+    std::env::set_current_dir(std::env::var("YANG_SCHEMAS_DIR").expect("env var YANG_SCHEMAS_DIR"))
+        .expect("Failed to set YANG search directory");
+    // Initialize context.
+    let mut ctx = Context::new(ContextFlags::NO_YANGLIBRARY).expect("Failed to create context");
+
+    ctx.load_module("rtbrick-config", None, &[])
+        .expect("Failed to load module");
+
+    //for module in ctx.modules(false) {
+    //    eprintln!("loaded module {}@{:?}", module.name(), module.revision());
+    //}
+
+    let module = ctx.get_module_latest("rtbrick-config").unwrap();
+
+    let roots = module.data();
+
+    match cli.command {
+        Commands::NixOptions => Ok(print_nix_options_roots(roots)),
+        Commands::Nix2yang { input } => convert(roots, ConvertMode::Nix2Yang, input),
+        Commands::Yang2nix { input } => convert(roots, ConvertMode::Yang2Nix, input),
+        Commands::Diff { left, right } => diff(&ctx, left, right),
+    }
 }
