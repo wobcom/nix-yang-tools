@@ -494,7 +494,17 @@ fn convert<'a>(
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    match &mut cli.command {
+        Commands::NixOptions => {}
+        Commands::Nix2yang { input } => *input = input.canonicalize()?,
+        Commands::Yang2nix { input } => *input = input.canonicalize()?,
+        Commands::Diff { left, right, .. } => {
+            *left = left.canonicalize()?;
+            *right = right.canonicalize()?;
+        }
+    }
 
     std::env::set_current_dir(
         std::env::var("YANG_SCHEMAS_DIR").context("env var YANG_SCHEMAS_DIR")?,
