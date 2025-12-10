@@ -210,7 +210,7 @@ fn raw_value_at<'a>(tree: &yang2::data::DataTree<'a>, path: &str) -> Result<Box<
     let dnode = tree.find_path(path).context("dtree path")?;
     Ok(RawJsonValue::from_string(
         dnode
-            .print_string(DataFormat::JSON, DataPrinterFlags::empty())
+            .print_string(DataFormat::JSON, DataPrinterFlags::SHRINK)
             .context("printing data diff")?
             .ok_or(anyhow!("expected diff str"))?,
     )?)
