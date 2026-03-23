@@ -278,6 +278,7 @@ fn diff(
 
     if json {
         for hunk in hunks {
+            // NDJSON
             println!("{}", serde_json::to_string(&hunk?)?);
         }
     } else {
@@ -287,10 +288,14 @@ fn diff(
             match hunk.diff {
                 DataDiff::Replace { delete, create } => {
                     println!("Replace @{}", hunk.path);
-                    let json = serde_json::to_string_pretty(&delete)?;
+                    let json = serde_json::to_string_pretty(&serde_json::from_str::<
+                        serde_json::Value,
+                    >(delete.get())?)?;
                     set_color(&DataDiff::Delete { delete });
                     println!("{}", json);
-                    let json = serde_json::to_string_pretty(&create)?;
+                    let json = serde_json::to_string_pretty(&serde_json::from_str::<
+                        serde_json::Value,
+                    >(create.get())?)?;
                     set_color(&DataDiff::Create { create });
                     println!("{}", json);
                 }
@@ -298,14 +303,18 @@ fn diff(
                     println!(
                         "Delete @{}\n{}",
                         hunk.path,
-                        serde_json::to_string_pretty(&delete)?
+                        serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(
+                            delete.get()
+                        )?)?
                     );
                 }
                 DataDiff::Create { create } => {
                     println!(
                         "Create @{}\n{}",
                         hunk.path,
-                        serde_json::to_string_pretty(&create)?
+                        serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(
+                            create.get()
+                        )?)?
                     );
                 }
             }
